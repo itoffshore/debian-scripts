@@ -22,7 +22,7 @@ apt-get update
 apt-get -y --download-only dist-upgrade
 apt-get -y upgrade
 apt-get -y dist-upgrade
-apt-get -y install inetutils-syslogd htop upstart sysvinit-utils
+apt-get -y install upstart sysvinit-utils
 apt-get -y remove --purge --auto-remove systemd
 apt-get clean
 
