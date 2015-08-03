@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# sysvinit has been obsoleted by Debian & is not installable #####
+# the choice for init is currently upstart or systemd or nothing #
+#
 ## tested with upgrading Debian Wheezy OpenVZ containers #########
 ## for a systemd free Debian Jessie desktop see Antix Linux 15  ##
 ## http://antix.mepis.org/index.php?title=Main_Page  #############
@@ -15,11 +18,13 @@ dpkg -i devuan*.deb
 rm -f devuan*.deb
 apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 94532124541922FB
 # wheezy ---> jessie upgrade
+# due to a conflict with udev plymouth must be removed
 apt-get -y remove plymouth
 apt-get update
 apt-get -y --download-only dist-upgrade
 apt-get -y upgrade
 apt-get -y dist-upgrade
+# plymouth is a dependency of upstart & is reinstalled here
 apt-get -y install upstart sysvinit-utils
 apt-get -y autoremove
 apt-get clean
