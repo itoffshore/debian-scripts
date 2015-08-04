@@ -1,0 +1,99 @@
+#!/bin/sh
+
+# this script implements all of the recommendations to secure OpenSSH shown & mentioned on:
+# https://it-offshore.co.uk/security/51-alpine-linux-chrooted-sftp-secure-ssh-ciphers
+#
+port=22
+config=/etc/ssh/sshd_config
+# use secure ciphers
+kex="KexAlgorithms curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256"
+ciphers="Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr"
+macs="MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256"
+
+if [ ! -f "$config" ]; then
+	echo "Configuration file: '$config' is missing"
+	exit 1
+fi
+
+if [ "$(id -un)" != "root" ]; then
+	echo "This script must be run as root" >&2
+	exit 1
+fi
+
+if [ -z "$(ls /home/*/.ssh/authorized_keys 2>/dev/null)" ]; then
+	echo "Run 'ssh-copy-id -p $port user@host' on your local machine to copy your keys & rerun me"
+	exit 1
+fi
+
+if [ ! -f "${config%/*}/sshd_config.bak" ]; then
+        cp $config $config.bak
+fi
+
+# change port
+sed -i s"|.*Port.*|Port $port|" $config
+
+# remove unsafe keys from config
+sed -i '/.*ssh_host_dsa_key/d' $config
+sed -i '/.*ssh_host_ecdsa_key/d' $config
+
+# set ed25529 as the first host key choice
+sed -i '/.*ssh_host_ed25519_key/d' $config
+rsa_line=$(sed -n '/.*ssh_host_rsa_key/=' $config)
+sed -i $rsa_line"iHostKey /etc/ssh/ssh_host_ed25519_key" $config
+
+# remove existing cipher settings
+heading="# Ciphers and keying"
+for x in KexAlgorithms Ciphers MACs "$heading"; do
+        sed -i "/^$x/d" $config
+done
+
+# insert ciphers
+cipher_line=$(( $(sed -n '/^ServerKeyBits/=' $config) + 2))
+sed -i "$cipher_line i $heading\n$kex\n$ciphers\n$macs\n" $config
+# remove possible duplicate blank lines
+cat -s $config > $config.tmp && mv -f $config.tmp $config
+
+# secure key logins only
+for x in PermitRootLogin PasswordAuthentication ChallengeResponseAuthentication PermitEmptyPasswords UsePAM; do
+	sed -i "s/^$x.*/$x no/" $config
+	sed -i "s/^#$x.*/$x no/" $config
+	if ! grep "^$x no" $config 1>/dev/null; then
+		x_line=$(sed -n "/.*$x/=" $config | head -1)
+		sed -i "$x_line i $x no" $config
+	fi
+done
+
+# remove unsafe & generate secure host keys
+cd ${config%/*}
+rm ssh_host_dsa_key* 2>/dev/null
+rm ssh_host_ecdsa_key* 2>/dev/null
+for key in ssh_host_ed25519_key ssh_host_rsa_key; do
+	if [ ! -f "${config%/*}/$key" ]; then # ed25519 keys are 256 bits & equivalent to a 3072 bit RSA key
+		case "$key" in # http://ed25519.cr.yp.to/
+		  ssh_host_ed25519_key) echo 'y' |ssh-keygen -t ed25519 -N '' -f ${config%/*}/$key;;
+		      ssh_host_rsa_key) echo 'y' |ssh-keygen -b 4096 -t rsa -N '' -f ${config%/*}/$key;;
+		esac
+	fi
+done
+
+# secure moduli
+awk '$5 > 4000' "${config%/*}/moduli" > "${HOME}/moduli"
+if [ $(wc -l "${HOME}/moduli" | awk '{print $1}') -ge 25 ]; then
+	mv "${HOME}/moduli" ${config%/*}/moduli
+else
+	echo "Generating ${config%/*}/moduli (takes approx 4 hours)..."
+	ssh-keygen -G ${config%/*}/moduli.all -b 4096
+	ssh-keygen -T ${config%/*}/moduli.safe -f ${config%/*}/moduli.all
+	mv ${config%/*}/moduli.safe ${config%/*}/moduli
+	rm ${config%/*}/moduli.all
+fi
+
+# reload ssh
+if [ -f "/etc/init.d/ssh" ]; then
+        service ssh reload
+elif [ -f "/etc/init.d/sshd" ]; then
+        rc-service sshd reload
+fi
+
+echo "$config & ${config%/*}/moduli have been secured."
+exit 1
