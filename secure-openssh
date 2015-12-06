@@ -54,7 +54,7 @@ sed -i "$cipher_line i $heading\n$kex\n$ciphers\n$macs\n" $config
 cat -s $config > $config.tmp && mv -f $config.tmp $config
 
 # secure key logins only
-for x in PermitRootLogin PasswordAuthentication ChallengeResponseAuthentication PermitEmptyPasswords UsePAM; do
+for x in PermitRootLogin PasswordAuthentication ChallengeResponseAuthentication PermitEmptyPasswords; do
 	sed -i "s/^$x.*/$x no/" $config
 	sed -i "s/^#$x.*/$x no/" $config
 	if ! grep "^$x no" $config 1>/dev/null; then
