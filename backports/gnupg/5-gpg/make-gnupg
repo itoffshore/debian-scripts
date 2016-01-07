@@ -1,0 +1,60 @@
+#!/bin/sh
+
+## backporting gnupg2 from Debian Sid to Jessie ##
+
+pkgname=gnupg
+pkgname_real=gnupg2
+pkgver=2.1.10
+debver=${pkgver}-3
+format=tar.bz2
+deb_src=http://http.debian.net/debian/pool/main/g/$pkgname_real/${pkgname_real}_${debver}.debian.tar.bz2
+sources="ftp://ftp.gnupg.org/gcrypt/$pkgname/$pkgname-$pkgver.$format
+	ftp://ftp.gnupg.org/gcrypt/$pkgname/$pkgname-$pkgver.$format.sig
+  	"
+
+extract () {
+  if [ -f $1 ] ; then
+      case $1 in
+          *.tar.bz2)   tar xvjf $1    ;;
+          *.tar.gz)    tar xvzf $1    ;;
+          *.tar.xz)    tar xvfJ $1    ;;
+          *)           echo "don't know how to extract '$1'..." ;;
+      esac
+  else
+      echo "'$1' is not a valid file!"
+  fi
+}
+
+# start
+rm -rf $pkgname-$pkgver
+
+for file in $sources $deb_src; do
+  if [ ! -f "$(basename $file)" ]; then
+    wget $file
+  fi
+done
+
+extract $(basename $deb_src)
+# should show RSA key ID 4F25E3B6 - see: https://www.gnupg.org/signature_key.html
+gpg --verify $pkgname-$pkgver.$format.sig $pkgname-$pkgver.$format
+extract $pkgname-$pkgver.$format
+mv debian ./$pkgname-$pkgver
+cd $pkgname-$pkgver
+sudo apt-get update
+sudo apt-get install build-essential devscripts equivs pbuilder fakeroot strace quilt dh-make cmake
+sudo mk-build-deps --install debian/control
+# choose 's' for single & <enter>
+dh_make --createorig
+if [ -n "$pkgname_real" ]; then
+  orig_file=$(ls ../$pkgname*.orig.*)
+  real_file="${pkgname_real}_${orig_file#*_}"
+  mv $orig_file ../$real_file
+fi
+dpkg-buildpackage
+# for gnupg 2.1 to install you will need to:
+sudo apt-get remove gnupg2 gnupg-agent
+# & reinstall the new ones with gnupg-agent first
+sudo dpkg -i ../gnupg-agent*.deb
+sudo dpkg -i ../gnupg2_$pkgver*.deb
+# if you use fwknop-client this will need to be reinstalled
+
