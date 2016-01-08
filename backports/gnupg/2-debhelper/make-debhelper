@@ -32,6 +32,7 @@ for file in $sources $deb_src; do
 done
 
 extract ${pkgname}_$pkgver.$format
+mv $pkgname $pkgname-$pkgver
 cd $build_dir
 sudo mk-build-deps --install debian/control
 dh_make --createorig
