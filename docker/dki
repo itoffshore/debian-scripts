@@ -4,7 +4,7 @@
 data_paths=/srv/dockerdata/debuild:/build    #
 data_name=debdata			     #
 data_image=user/debdata		             #
-bridge=br0				     #
+bridge=docker0				     #
 ipfile=/etc/default/docker_ips		     #
 ##############################################
 
