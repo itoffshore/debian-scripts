@@ -1,0 +1,153 @@
+#!/bin/sh
+
+##############################################
+data_paths=/srv/dockerdata/debuild:/build    #
+data_name=debdata			     #
+data_image=user/debdata		             #
+bridge=br0				     #
+ipfile=/etc/default/docker_ips		     #
+##############################################
+
+usage() {
+    local script=$(echo "`basename $0`")
+    cat <<EOF
+$script: Create & Destroy Docker container + data-only container + optional static ip's
+
+Usage: $script [OPTIONS] CONTAINERNAME -- [DOCKER RUN COMMANDS]
+
+[ -c | --create ] : Create dockers
+[ -r | --remove ] : Remove dockers
+[ -i | --image  ] : Use Image
+[ -s | --static ] : Use Static IP Address
+[ -h | --help   ] : this help message
+
+Examples:
+
+ $script -c myname -i image -s ipaddr    (create container with static ip)
+ $script -c myname -i image -- --cmd     (create container + other docker run command)
+ $script --remove myname                 (remove container myname)
+ $script --remove con                    (remove all containers)
+ $script -r img                          (remove all <none> images)
+ $script -r all                          (remove ALL containers & <none> images)
+
+EOF
+    return 0
+}
+
+catch_exits() {
+	echo -e "\n$(basename $0): exiting" 1>&2
+	exit 1
+}
+
+docker_rmi() {
+	local image= image_list="$(docker images | grep "^<none>" | awk '{print $3}')"
+	for image in $image_list; do
+		docker rmi -f $image
+	done
+	if [ $? -ne 0 ]; then
+		echo "Remove containers before purging images or '$(echo "`basename $0`") -d all'"
+	fi
+}
+
+docker_rm() {
+	local container= hash_list="$(docker ps -a -q)"
+	for container in $hash_list; do
+                docker rm -f $container
+        done
+}
+
+check_status() {
+	echo $(docker inspect --format '{{ .State.Running }}' $1 2>/dev/null)
+}
+
+interface_ip() {
+        /sbin/ifconfig $1 |grep 'inet addr:' |awk -F: '{print $2}' |awk '{print $1}'
+}
+
+set_ip() {
+	ipaddr=$(grep -w ^"$name" $ipfile 2>/dev/null |awk '{print $2}')
+	if [ -z "$ipaddr" ]; then
+		echo "Bridge ip address = $(interface_ip $bridge)"
+                echo -n "Enter ip address for container '$name' ?: "; read ipaddr
+                ipaddr=$(echo $ipaddr |tr -cd '[:xdigit:] [\:] [\.]')
+                sudo bash -c "echo $name $ipaddr >> $ipfile"
+        fi
+}
+
+new_name() {
+	local name=$1 i=2
+	while :; do
+		if [ -z "$(check_status $name$i)" ]; then break; fi
+		i=$(( i + 1 ));
+	done
+	echo "$name$i"
+}
+
+
+###### start #############
+trap catch_exits 1 2 15 20
+options=$(getopt -o c:r:i:hs --long create:,remove:,image:,help,static -- "$@")
+
+if [ $? -ne 0 ] || ! echo $1 |grep ^"-" 1>/dev/null; then
+        usage
+        exit 1
+fi
+
+eval set -- "$options"
+
+while :; do
+        case "$1" in
+           -h | --help)    usage && exit 1;;
+           -c | --create) action="create"; name=$2; shift 2;;
+           -r | --remove) action="remove"; name=$2; shift 2;;
+           -i | --image) baseimage=$2; shift 2;;
+	   -s | --static) ip_opts="static" shift;;
+	   -- ) docker_opts=$@; docker_opts=${docker_opts#--*}; shift; break ;;
+            *) break;;
+        esac
+done
+
+case "$action" in # specifying name instead of repo/name also works
+	create) baseimage=$(docker images| awk '{print $1}' |grep -w $baseimage);
+		data_cmd="run -t -v $data_paths --name $data_name --hostname $data_name $data_image";
+		container_cmd="run -itd $docker_opts --volumes-from $data_name --name $name --hostname $name $baseimage";
+		for cmd in "$data_cmd" "$container_cmd"; do
+			container_name=$(echo $cmd |awk -F"--name " '{print $2}' |awk '{print $1}')
+			case "$(check_status $container_name)" in
+		   	   true) echo "Container '$container_name' already running";
+				 name2=$(new_name $name);
+				 read -p "Start new container '$name2' ?: " ans;
+				 case "$ans" in
+				  y*|Y*) cmd=$(echo $cmd | sed "s|--name $name|--name $name2|");
+					 cmd=$(echo $cmd | sed "s|--hostname $name|--hostname $name2|");
+				 	 echo "Creating '$name2':\ndocker $cmd";
+				 	 docker $cmd;;
+				 esac;;
+		  	  false) echo "Starting '$container_name'";
+				 docker start $container_name;;
+		      	      *) echo "Creating '$container_name':\ndocker $cmd";
+				 docker $cmd;;
+			esac
+		done
+
+		case "$ip_opts" in
+		  static) set_ip;
+			gateway=$(/sbin/route |grep default |awk '{print $2}');
+			echo "Setting ip address: $ipaddr for container: '$name'"
+			sudo pipework $bridge $name $ipaddr/24@$gateway;;
+		esac
+	    	;;
+	remove) case "$name" in
+	  	img|IMG) docker_rmi;;
+		con|CON) docker_rm;;
+	  	all|ALL) docker_rm;
+			 docker_rmi;;
+                      *) docker rm -f $name;;
+	    	esac
+	    	;;
+esac
+
+echo; docker images
+echo; docker ps -a
+
+exit 0
