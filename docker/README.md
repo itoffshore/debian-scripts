@@ -1,3 +1,5 @@
+`32 & 64bit` Debian Jessie build environments
+---
 Build the containers with:
 
 `docker build -t $USER/your_contaner_name /path/to/Dockerfile`
