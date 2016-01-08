@@ -1,0 +1,92 @@
+#!/bin/sh
+
+# install debian build dependencies #
+# You can also run:
+# sudo mk-build-deps --install debian/control
+# (from the devscripts package)
+
+depends=
+keep_depends="python systemd-units"
+
+NORMAL="\033[1;0m"
+STRONG="\033[1;1m"
+RED="\033[1;31m"
+GREEN="\033[1;32m"
+BLUE="\033[0m\033[38;5;68m\033[1m"
+
+print_stop() {
+    local prompt="${STRONG}$1 ${RED}$2${NORMAL}"
+        printf "${prompt}\n"
+}
+
+print_start() {
+    local prompt="${STRONG}$1 ${GREEN}$2${NORMAL}"
+        printf "${prompt}\n"
+}
+
+usage() {
+    cat <<EOF
+$(echo "`basename $0`"): manage  debian build dependencies
+
+[ -i | --install ]: install controlfile dependencies
+[ -r | --remove ] : remove controlfile dependencies
+[ -h | --help ]   : this help message
+
+Examples:  $(echo "`basename $0`") -i controlfile
+     $(echo "`basename $0`") -r "controlfile pkg1 pkg2 variable$...."
+EOF
+    return 0
+}
+
+check_depends() {
+	if ! echo $keep_depends |grep "$1" 1>/dev/null && [ "$1" != "-" ]; then
+    		local filtered=$(echo $1 |grep -v '^[0-9]')
+    		depends="$depends $filtered"
+	fi
+}
+
+# start
+options=$(getopt -o i:r:h --long install:,remove:,help -- "$@")
+
+if [ $? -ne 0 ] || ! echo $1 |grep ^"-" 1>/dev/null; then
+	usage
+	exit 1
+fi
+
+eval set -- "$options"
+
+while :; do
+	case "$1" in
+           -h | --help)    usage && exit 1;;
+           -i | --install) action="install"; deplist=$2; shift 2;;
+           -r | --remove)  action="remove"; deplist=$2; shift 2;;
+            *)             break;;
+	esac
+done
+
+# find build dependencies
+for input in $deplist; do
+	if [ -f "$input" ]; then # change here code to grab depends
+		for pkg in $(sed -e '1,/Build-Depends:/d' -e '/Standards-Version: 3.9.5/,$d' $input |tr -d ','); do
+      			check_depends $pkg
+    		done
+  	else
+    		check_depends $input
+  	fi
+done
+depends=$(echo $depends |grep -v '^[0-9]')
+
+case "$action" in
+	i*|I*) action="install";
+         	print_start "\nInstall build dependencies:" "\n\n$(echo $depends |sed -e 's/^[ \t]*//')\n";;
+	r*|R*) action="remove";
+        	print_stop "\nRemove build dependencies:" "\n\n$(echo $depends |sed -e 's/^[ \t]*//')\n";;
+esac
+
+if [ -z "$depends" ]; then
+	print_stop "Error: " "no dependencies found"
+else
+	sudo apt-get $action $depends
+fi
+exit 0
+

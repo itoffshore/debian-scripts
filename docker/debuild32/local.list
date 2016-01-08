@@ -1,0 +1,3 @@
+# see trivial local repos
+# https://www.debian.org/doc/manuals/repository-howto/repository-howto
+deb file:/build/apt ./
