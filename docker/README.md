@@ -2,7 +2,7 @@
 ---
 * Build the containers with:
 
-`docker build -t $USER/your_image_name /path/to/Dockerfile`
+`docker build -t $USER/your_image_name /path/to/dir-with-Dockerfile`
 
 * Use the [`dki` script](https://github.com/itoffshore/debian-scripts/blob/master/docker/dki) to start a build environment with a `data-only` container:
 
