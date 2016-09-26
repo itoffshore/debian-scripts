@@ -1,0 +1,83 @@
+#!/bin/sh
+
+## sSMTP for Debian with Red Hat patches for better encryption ##
+##-------------------------------------------------------------##
+## the normal ciphers:            RSA_AES_128_CBC_SHA1         ##
+## this version uses:------ECDHE-RSA-AES256-GCM-SHA384-------- ##
+
+pkgname=ssmtp
+pkgver=2.64
+revision=8
+_pkgver=$pkgver-$revision
+format=tar.bz2
+deb_src=http://http.debian.net/debian/pool/main/s/$pkgname/${pkgname}_$_pkgver.debian.$format
+sources=http://http.debian.net/debian/pool/main/s/$pkgname/${pkgname}_$pkgver.orig.$format
+patches="http://pkgs.fedoraproject.org/cgit/rpms/ssmtp.git/plain/ssmtp-aliases.patch
+	http://pkgs.fedoraproject.org/cgit/rpms/ssmtp.git/plain/ssmtp-authpass.patch
+	http://pkgs.fedoraproject.org/cgit/rpms/ssmtp.git/plain/ssmtp-garbage_writes.patch
+	http://pkgs.fedoraproject.org/cgit/rpms/ssmtp.git/plain/ssmtp-defaultvalues.patch
+	http://pkgs.fedoraproject.org/cgit/rpms/ssmtp.git/plain/ssmtp-remote-addr.patch
+	http://pkgs.fedoraproject.org/cgit/rpms/ssmtp.git/plain/ssmtp-md5auth-non-rsa.patch
+	http://pkgs.fedoraproject.org/cgit/rpms/ssmtp.git/plain/ssmtp-validate-TLS-server-cert.patch
+	"
+
+build_dir=$PWD/$pkgname-$pkgver
+
+extract () {
+  if [ -f $1 ] ; then
+      case $1 in
+          *.tar.bz2)   tar xvjf $1    ;;
+          *.tar.gz)    tar xvzf $1    ;;
+          *.tar.xz)    tar xvfJ $1    ;;
+          *)           echo "don't know how to extract '$1'..." ;;
+      esac
+  else
+      echo "'$1' is not a valid file!"
+  fi
+}
+
+# start
+rm -rf $build_dir
+
+for file in $sources $deb_src $patches; do
+  if [ ! -f "$(basename $file)" ]; then
+    wget $file
+  fi
+done
+
+#unpack
+extract $(basename $sources)
+extract $(basename $deb_src)
+rm -f debian/patches/*
+
+# copy red hat patches
+cp *.patch debian/patches
+mv debian $build_dir
+cd $build_dir
+
+# debian quilt moans about one of the redhat patches
+for file in debian/patches/*.patch; do
+	patch -p1 -i $file
+done
+rm -f debian/patches/*.patch
+
+# build against openssl
+sed -i 's/libgnutls-openssl-dev/libssl-dev/' debian/control
+# link against libcrypto
+sed -i 's/$(CC) -o ssmtp $(OBJS) @LIBS@ $(CFLAGS)/$(CC) -o ssmtp $(OBJS) @LIBS@ $(CFLAGS) $(LDFLAGS)/' Makefile.in
+# change TLS config paths
+sed -i 's|/etc/pki/tls/certs/ca-bundle.crt|/etc/ssl/certs/ca-certificates.crt|' ssmtp.conf
+sed -i 's|/etc/pki/tls/private/ssmtp.pem|/etc/ssl/private/ssmtp.pem|' ssmtp.conf
+
+# build will stop to give a version revision
+myrevision=$(( $revision + 1 ))
+debchange -b -v $pkgver-$myrevision
+
+# & for you to give the changes patch a name
+dpkg-source --commit
+
+# finish building
+sudo mk-build-deps --install debian/control
+rm -f *build-deps*.deb
+dh_make --createorig
+dpkg-buildpackage
