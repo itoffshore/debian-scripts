@@ -3,12 +3,25 @@
 # this script implements all of the recommendations to secure OpenSSH shown & mentioned on:
 # https://it-offshore.co.uk/security/51-alpine-linux-chrooted-sftp-secure-ssh-ciphers
 #
-port=22
+port=16022
 config=/etc/ssh/sshd_config
 # use secure ciphers
 kex="KexAlgorithms curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256"
 ciphers="Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr"
 macs="MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256"
+
+login_type() {
+	local var=$1 setting=$2 line=
+
+	sed -i "s/^$var.*/$var $setting/" $config
+	sed -i "s/^#$var.*/$var $setting/" $config
+	if ! grep "^$var $setting" $config 1>/dev/null; then
+		line=$(sed -n "/.*$var/=" $config | head -1)
+		sed -i "$line i $var $setting" $config
+	fi
+}
+
+### START ###
 
 if [ ! -f "$config" ]; then
 	echo "Configuration file: '$config' is missing"
@@ -26,7 +39,7 @@ if [ -z "$(ls /home/*/.ssh/authorized_keys 2>/dev/null)" ]; then
 fi
 
 if [ ! -f "${config%/*}/sshd_config.bak" ]; then
-        cp $config $config.bak
+	cp $config $config.bak
 fi
 
 # change port
@@ -44,7 +57,7 @@ sed -i $rsa_line"iHostKey /etc/ssh/ssh_host_ed25519_key" $config
 # remove existing cipher settings
 heading="# Ciphers and keying"
 for x in KexAlgorithms Ciphers MACs "$heading"; do
-        sed -i "/^$x/d" $config
+	sed -i "/^$x/d" $config
 done
 
 # insert ciphers
@@ -55,18 +68,16 @@ cat -s $config > $config.tmp && mv -f $config.tmp $config
 
 # secure key logins only
 for x in PermitRootLogin PasswordAuthentication ChallengeResponseAuthentication PermitEmptyPasswords; do
-	sed -i "s/^$x.*/$x no/" $config
-	sed -i "s/^#$x.*/$x no/" $config
-	if ! grep "^$x no" $config 1>/dev/null; then
-		x_line=$(sed -n "/.*$x/=" $config | head -1)
-		sed -i "$x_line i $x no" $config
-	fi
+	login_type $x no
 done
+
+# now the default root setting in openssh
+login_type PermitRootLogin prohibit-password
 
 # remove unsafe & generate secure host keys
 cd ${config%/*}
-rm ssh_host_dsa_key* 2>/dev/null
-rm ssh_host_ecdsa_key* 2>/dev/null
+rm -f ssh_host_dsa_key* 2>/dev/null
+rm -f ssh_host_ecdsa_key* 2>/dev/null
 for key in ssh_host_ed25519_key ssh_host_rsa_key; do
 	if [ ! -f "${config%/*}/$key" ]; then # ed25519 keys are 256 bits & equivalent to a 3072 bit RSA key
 		case "$key" in # http://ed25519.cr.yp.to/
@@ -90,10 +101,11 @@ fi
 
 # reload ssh
 if [ -f "/etc/init.d/ssh" ]; then
-        service ssh reload
+	service ssh reload
 elif [ -f "/etc/init.d/sshd" ]; then
-        rc-service sshd reload
+	rc-service sshd reload
 fi
 
 echo "$config & ${config%/*}/moduli have been secured."
-exit 1
+exit 0
+
